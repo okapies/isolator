@@ -10,9 +10,11 @@ object IsolatorOpenCVApp extends App {
 
   args match {
     case Array(inFile, outFile) =>
-      System.err.println("Elapsed: " + new Benchmark {
-        def run = saveImage(outFile, loadVideo(inFile)(mean))
-      }.runBenchmark(1))
+      val start = System.currentTimeMillis()
+
+      saveImage(outFile, loadVideo(inFile)(mean))
+
+      System.err.println(s"Elapsed: ${System.currentTimeMillis() - start}")
     case _ =>
       System.err.println("Usage: isolator <input> <output>")
   }
