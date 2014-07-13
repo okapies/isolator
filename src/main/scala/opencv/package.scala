@@ -8,11 +8,27 @@ package object opencv {
 
   import ExecutionContext.Implicits.global
 
+  def using[A <: {def release(): Unit}, B]
+      (m: A)(f: A => B): B = {
+    try {
+      f(m)
+    } finally {
+      m.release()
+    }
+  }
+
+  def using[A](a: (Mat, Int), b: (Mat, Int))(f: ((Mat, Int), (Mat, Int)) => A): A = {
+    try {
+      f(a, b)
+    } finally {
+      a._1.release()
+      b._1.release()
+    }
+  }
+
   def add(a: Mat, b: Mat): Mat = {
     val dst = new Mat
     Core.add(a, b, dst)
-    a.release()
-    b.release()
 
     dst
   }
@@ -20,7 +36,6 @@ package object opencv {
   def divide(a: Mat, b: Scalar): Mat = {
     val dst = new Mat
     Core.divide(a, b, dst)
-    a.release()
 
     dst
   }
@@ -28,7 +43,7 @@ package object opencv {
   def convertTo(rtype: Int)(a: Mat): Mat = {
     val dst = new Mat
     a.convertTo(dst, rtype)
-    a.release()
+    a.release() // TODO
 
     dst
   }
@@ -36,36 +51,61 @@ package object opencv {
   def mean(size: Size)(typ: Int)(frames: Iterator[Mat]): Mat = {
     val imdType = CvType.CV_32SC3 // TODO
 
-    def zeros = Mat.zeros(size, imdType)
+    val zero = Mat.zeros(size, imdType) -> 0
+    def plus(a: (Mat, Int), b: (Mat, Int)) = add(a._1, b._1) -> (a._2 + b._2)
     val (sum, cnt) =
       frames
-        .map(convertTo(imdType))
-        .foldLeft((zeros, 0)) { case ((sum, i), m) => (add(sum, m), i + 1) }
+        .map(convertTo(imdType)(_) -> 1)
+        .fold(zero)(using(_, _)(plus))
 
-    divide(sum, new Scalar(cnt, cnt, cnt))
+    using (sum) { sum =>
+      divide(sum, new Scalar(cnt, cnt, cnt))
+    }
   }
 
-  def meanPar(batchSize: Int)(size: Size)(typ: Int)(frames: Iterator[Mat]): Mat = {
+  def meanPar(batchSize: Int)
+             (size: Size)
+             (typ: Int)
+             (frames: Iterator[Mat]): Mat = {
     val imdType = CvType.CV_32SC3 // TODO
 
-    def zero = Mat.zeros(size, imdType) -> 0
+    val zero = Mat.zeros(size, imdType) -> 0
     def plus(a: (Mat, Int), b: (Mat, Int)) = add(a._1, b._1) -> (a._2 + b._2)
 
-    val partitions =
-      Iterator.continually(frames.take(batchSize).toSeq).takeWhile(_.nonEmpty)
+    val partitions = frames.grouped(batchSize)
     val (sum, cnt) =
+      partitions.map { ms =>
+        ms.par.map(convertTo(imdType)(_) -> 1).fold(zero) { (a, b) =>
+          val dst = plus(a, b)
+          if (a._1 ne zero._1) { a._1.release() }
+          if (b._1 ne zero._1) { b._1.release() }
+
+          dst
+        }
+      }.fold(zero) { (a, b) =>
+        val dst = plus(a, b)
+        if (a._1 ne zero._1) { a._1.release() }
+        if (b._1 ne zero._1) { b._1.release() }
+
+        dst
+      }
+/*
       Await.result(
-        Future.traverse(partitions) { ms: Seq[Mat] =>
+        Future.traverse(partitions) { ms: Iterator[Mat] =>
           Future(ms.map(convertTo(imdType)(_) -> 1).fold(zero)(plus))
         }.map { ps: Iterator[(Mat, Int)] =>
           ps.fold(zero)(plus)
         },
         Duration.Inf)
+*/
 
-    divide(sum, new Scalar(cnt, cnt, cnt))
+    using (sum) { sum =>
+      divide(sum, new Scalar(cnt, cnt, cnt))
+    }
   }
 
-  def loadVideo[A](filename: String)(f: Size => Int => Iterator[Mat] => A): A = {
+  def loadVideo[A, B](filename: String)
+                     (f: Size => Int => Iterator[Mat] => A): A = {
     val cap = new VideoCapture(filename)
     try {
       if (cap.grab()) {
@@ -75,8 +115,8 @@ package object opencv {
         val typ = head.`type`
 
         f(size)(typ)(
-          Iterator.single(head)
-            ++ Iterator.continually(nextFrame(cap)).takeWhile(_ != None).map(_.get))
+          Iterator.single(head) ++
+          Iterator.continually(nextFrame(cap)).takeWhile(_ != None).map(_.get))
       } else {
         f(new Size)(-1)(Iterator.empty)
       } 
