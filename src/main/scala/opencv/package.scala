@@ -8,32 +8,31 @@ package object opencv {
 
   import ExecutionContext.Implicits.global
 
-  def using[A <: {def release(): Unit}, B]
-      (m: A)(f: A => B): B = {
+  def managed[A](a: Mat)(f: Mat => A): A = {
     try {
-      f(m)
+      f(a)
     } finally {
-      m.release()
+      a.release()
     }
   }
 
-  def using[A](a: (Mat, Int), b: (Mat, Int))(f: ((Mat, Int), (Mat, Int)) => A): A = {
+  def managed[A](a: Mat, b: Mat)(f: Mat => Mat => A): A = {
     try {
-      f(a, b)
+      f(a)(b)
     } finally {
-      a._1.release()
-      b._1.release()
+      a.release()
+      b.release()
     }
   }
 
-  def add(a: Mat, b: Mat): Mat = {
+  def add(a: Mat)(b: Mat): Mat = {
     val dst = new Mat
     Core.add(a, b, dst)
 
     dst
   }
 
-  def divide(a: Mat, b: Scalar): Mat = {
+  def divide(a: Mat)(b: Scalar): Mat = {
     val dst = new Mat
     Core.divide(a, b, dst)
 
@@ -43,7 +42,6 @@ package object opencv {
   def convertTo(rtype: Int)(a: Mat): Mat = {
     val dst = new Mat
     a.convertTo(dst, rtype)
-    a.release() // TODO
 
     dst
   }
@@ -51,57 +49,37 @@ package object opencv {
   def mean(size: Size)(typ: Int)(frames: Iterator[Mat]): Mat = {
     val imdType = CvType.CV_32SC3 // TODO
 
+    def widen(m: Mat) = managed(m)(convertTo(imdType))
     val zero = Mat.zeros(size, imdType) -> 0
-    def plus(a: (Mat, Int), b: (Mat, Int)) = add(a._1, b._1) -> (a._2 + b._2)
-    val (sum, cnt) =
-      frames
-        .map(convertTo(imdType)(_) -> 1)
-        .fold(zero)(using(_, _)(plus))
+    def plus(a: (Mat, Int), b: (Mat, Int)) = managed(a._1, b._1)(add) -> (a._2 + b._2)
 
-    using (sum) { sum =>
-      divide(sum, new Scalar(cnt, cnt, cnt))
-    }
+    val (sum, cnt) = frames.map(widen(_) -> 1).fold(zero)(plus)
+
+    managed(sum)(m => divide(m)(new Scalar(cnt, cnt, cnt)))
   }
 
-  def meanPar(batchSize: Int)
-             (size: Size)
-             (typ: Int)
-             (frames: Iterator[Mat]): Mat = {
+  def meanPar(batchSize: Int)(size: Size)(typ: Int)(frames: Iterator[Mat]): Mat = {
     val imdType = CvType.CV_32SC3 // TODO
 
-    val zero = Mat.zeros(size, imdType) -> 0
-    def plus(a: (Mat, Int), b: (Mat, Int)) = add(a._1, b._1) -> (a._2 + b._2)
+    def widen(m: Mat) = managed(m)(convertTo(imdType))
+    def plus(a: (Mat, Int), b: (Mat, Int)) = managed(a._1, b._1)(add) -> (a._2 + b._2)
 
     val partitions = frames.grouped(batchSize)
     val (sum, cnt) =
-      partitions.map { ms =>
-        ms.par.map(convertTo(imdType)(_) -> 1).fold(zero) { (a, b) =>
-          val dst = plus(a, b)
-          if (a._1 ne zero._1) { a._1.release() }
-          if (b._1 ne zero._1) { b._1.release() }
-
-          dst
-        }
-      }.fold(zero) { (a, b) =>
-        val dst = plus(a, b)
-        if (a._1 ne zero._1) { a._1.release() }
-        if (b._1 ne zero._1) { b._1.release() }
-
-        dst
-      }
+      partitions
+        .map(_.par.map(widen(_) -> 1).reduce(plus))
+        .reduce(plus)
 /*
-      Await.result(
-        Future.traverse(partitions) { ms: Iterator[Mat] =>
-          Future(ms.map(convertTo(imdType)(_) -> 1).fold(zero)(plus))
-        }.map { ps: Iterator[(Mat, Int)] =>
-          ps.fold(zero)(plus)
-        },
-        Duration.Inf)
+    val (sum, cnt) = Await.result(
+      Future.traverse(partitions) { ms: Iterator[Mat] =>
+        Future(ms.map(widen(_) -> 1).reduce(plus))
+      }.map { ps: Iterator[(Mat, Int)] =>
+        ps.reduce(plus)
+      },
+      Duration.Inf)
 */
 
-    using (sum) { sum =>
-      divide(sum, new Scalar(cnt, cnt, cnt))
-    }
+    managed(sum)(divide(_)(new Scalar(cnt, cnt, cnt)))
   }
 
   def loadVideo[A, B](filename: String)
