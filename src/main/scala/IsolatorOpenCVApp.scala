@@ -1,4 +1,4 @@
-import scala.testing.Benchmark
+import org.opencv.highgui.{Highgui, VideoCapture}
 
 import org.opencv.core.Core
 
@@ -12,7 +12,10 @@ object IsolatorOpenCVApp extends App {
     case Array(inFile, outFile) =>
       val start = System.currentTimeMillis()
 
-      saveImage(outFile, loadVideo(inFile)(mean))
+      using (new VideoCapture(inFile)) { cap =>
+        val frames = cap.takeWhile(_ != None).map(_.get)
+        Highgui.imwrite(outFile, mean(frames))
+      }
 
       System.err.println(s"Elapsed: ${System.currentTimeMillis() - start}")
     case _ =>
