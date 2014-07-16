@@ -10,6 +10,8 @@ javacOptions ++= Seq("-source", "1.6", "-target", "1.6")
 
 javacOptions in doc := Seq("-source", "1.6")
 
-libraryDependencies ++= Seq()
+libraryDependencies ++= Seq(
+  "org.scalacheck" %% "scalacheck" % "1.11.4" % "test"
+)
 
 mainClass := Some("IsolatorOpenCVApp")
