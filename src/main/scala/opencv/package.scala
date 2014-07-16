@@ -74,19 +74,23 @@ package object opencv {
       dst
     }
 
-    def countNonZero: Int = Core.countNonZero(self)
-
-    def extractChannel(coi: Int): Mat = {
+    def copy(): Mat = {
       val dst = new Mat
-      Core.extractChannel(self, dst, coi)
+      self.copyTo(dst)
 
       dst
     }
 
-    def extractChannels(): Iterator[Mat] =
-      (0 until self.channels).toIterator.map(self.extractChannel)
+    def copy(mask: Mat): Mat = {
+      val dst = new Mat
+      self.copyTo(dst, mask)
 
-    def ===(other: Mat): Boolean = other match {
+      dst
+    }
+
+    def countNonZero: Int = Core.countNonZero(self)
+
+    def eq(other: Mat): Boolean = other match {
       case _ if self.empty() && other.empty() => true
       case _ if
         self.rows != other.rows ||
@@ -98,6 +102,16 @@ package object opencv {
           diff.extractChannels().forall(_.consume(_.countNonZero == 0))
         }
     }
+
+    def extractChannel(coi: Int): Mat = {
+      val dst = new Mat
+      Core.extractChannel(self, dst, coi)
+
+      dst
+    }
+
+    def extractChannels(): Iterator[Mat] =
+      (0 until self.channels).toIterator.map(self.extractChannel)
 
   }
 
@@ -139,7 +153,7 @@ package object opencv {
 
       sum.consume(_ / new Scalar(cnt, cnt, cnt))
     } else {
-      new Mat
+      zeros(0, 0, CvType.CV_32SC3)
     }
   }
 
@@ -175,7 +189,7 @@ package object opencv {
 
       sum.consume(_ / new Scalar(cnt, cnt, cnt))
     } else {
-      new Mat
+      zeros(0, 0, CvType.CV_32SC3)
     }
   }
 
