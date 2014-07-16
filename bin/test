@@ -1,0 +1,3 @@
+#!/bin/sh
+
+sbt -Djava.library.path=./lib "test $*"
