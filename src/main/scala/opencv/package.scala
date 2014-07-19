@@ -131,7 +131,7 @@ package object opencv {
       dst
     }
 
-    def convertTo(rtype: Int): Mat = {
+    def convert(rtype: Int): Mat = {
       val dst = new Mat
       self.convertTo(dst, rtype)
 
@@ -198,12 +198,12 @@ package object opencv {
     if (ms.hasNext) {
       val imdType = CvType.CV_32SC3 // TODO
 
-      def widen(m: Mat) = m.consume(_.convertTo(imdType))
-      def plus(a: (Mat, Int), b: (Mat, Int)) = (a._1, b._1).consume(_ + _) -> (a._2 + b._2)
+      def widen(m: Mat) = m.consume(_.convert(imdType))
+      def plus(a: (Mat, Int), b: (Mat, Int)) = b._1.consume(a._1 += _) -> (a._2 + b._2)
 
       val (sum, cnt) = ms.map(widen(_) -> 1).reduce(plus)
 
-      sum.consume(_ / new Scalar(cnt, cnt, cnt))
+      sum.consume(_ /= new Scalar(cnt, cnt, cnt))
     } else {
       new Mat
     }
@@ -212,8 +212,8 @@ package object opencv {
     if (ms.hasNext) {
       val imdType = CvType.CV_32SC3 // TODO
 
-      def widen(m: Mat) = m.consume(_.convertTo(imdType))
-      def plus(a: (Mat, Int), b: (Mat, Int)) = (a._1, b._1).consume(_ + _) -> (a._2 + b._2)
+      def widen(m: Mat) = m.consume(_.convert(imdType))
+      def plus(a: (Mat, Int), b: (Mat, Int)) = b._1.consume(a._1 += _) -> (a._2 + b._2)
 
       val partitions = ms.grouped(batchSize)
       val (sum, cnt) =
@@ -235,7 +235,7 @@ package object opencv {
         Duration.Inf)
 */
 
-      sum.consume(_ / new Scalar(cnt, cnt, cnt))
+      sum.consume(_ /= new Scalar(cnt, cnt, cnt))
     } else {
       new Mat
     }
