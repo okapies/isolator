@@ -3,30 +3,41 @@ import org.opencv.highgui.VideoCapture
 
 package object opencv {
 
-  def using[A](a: Mat)(f: Mat => A): A = {
+  def using[A](m1: Mat)(f: Mat => A): A = {
     try {
-      f(a)
+      f(m1)
     } finally {
-      a.release()
+      m1.release()
     }
   }
 
-  def using[A](a: Mat, b: Mat)(f: (Mat, Mat) => A): A = {
+  def using[A](m1: Mat, m2: Mat)(f: (Mat, Mat) => A): A = {
     try {
-      f(a, b)
+      f(m1, m2)
     } finally {
-      a.release()
-      b.release()
+      m1.release()
+      m2.release()
     }
   }
 
-  def using[A](a: Mat, b: Mat, c: Mat)(f: (Mat, Mat, Mat) => A): A = {
+  def using[A](m1: Mat, m2: Mat, m3: Mat)(f: (Mat, Mat, Mat) => A): A = {
     try {
-      f(a, b, c)
+      f(m1, m2, m3)
     } finally {
-      a.release()
-      b.release()
-      c.release()
+      m1.release()
+      m2.release()
+      m3.release()
+    }
+  }
+
+  def using[A](m1: Mat, m2: Mat, m3: Mat, m4: Mat)(f: (Mat, Mat, Mat, Mat) => A): A = {
+    try {
+      f(m1, m2, m3, m4)
+    } finally {
+      m1.release()
+      m2.release()
+      m3.release()
+      m4.release()
     }
   }
 
@@ -53,12 +64,65 @@ package object opencv {
       dst
     }
 
+    def +=(other: Mat): Mat = {
+      Core.add(self, other, self)
+
+      self
+    }
+
+    def -(other: Mat): Mat = {
+      val dst = new Mat
+      Core.subtract(self, other, dst)
+
+      dst
+    }
+
+    def -=(other: Mat): Mat = {
+      Core.subtract(self, other, self)
+
+      self
+    }
+
+    def *(other: Mat): Mat = {
+      val dst = new Mat
+      Core.multiply(self, other, dst)
+
+      dst
+    }
+
+    def *=(other: Mat): Mat = {
+      Core.multiply(self, other, self)
+
+      self
+    }
+
     def /(other: Scalar): Mat = {
       val dst = new Mat
       Core.divide(self, other, dst)
 
       dst
     }
+
+    def /=(other: Scalar): Mat = {
+      Core.divide(self, other, self)
+
+      self
+    }
+
+    def ===(other: Mat): Boolean = other match {
+      case _ if self.empty() && other.empty() => true
+      case _ if
+        self.rows != other.rows ||
+        self.cols != other.cols ||
+        self.`type` != other.`type` ||
+        self.dims != other.dims => false
+      case _ =>
+        self.compare(other, Core.CMP_NE).consume { diff =>
+          diff.extractChannels().forall(_.consume(_.countNonZero == 0))
+        }
+    }
+
+    def =/=(other: Mat): Boolean = !(self === other)
 
     def compare(other: Mat, cmpop: Int): Mat = {
       val dst = new Mat
@@ -90,19 +154,6 @@ package object opencv {
 
     def countNonZero: Int = Core.countNonZero(self)
 
-    def eq(other: Mat): Boolean = other match {
-      case _ if self.empty() && other.empty() => true
-      case _ if
-        self.rows != other.rows ||
-        self.cols != other.cols ||
-        self.`type` != other.`type` ||
-        self.dims != other.dims => false
-      case _ =>
-        self.compare(other, Core.CMP_NE).consume { diff =>
-          diff.extractChannels().forall(_.consume(_.countNonZero == 0))
-        }
-    }
-
     def extractChannel(coi: Int): Mat = {
       val dst = new Mat
       Core.extractChannel(self, dst, coi)
@@ -123,6 +174,10 @@ package object opencv {
     def consume[A](f: (Mat, Mat, Mat) => A): A = using(self._1, self._2, self._3)(f)
   }
 
+  implicit class RichMatTuple4(val self: (Mat, Mat, Mat, Mat)) extends AnyVal {
+    def consume[A](f: (Mat, Mat, Mat, Mat) => A): A = using(self._1, self._2, self._3, self._4)(f)
+  }
+
   implicit class VideoCaptureIterator(val cap: VideoCapture) extends Iterator[Option[Mat]] {
 
     override def hasNext: Boolean = true // always produce Some[Mat] or None
@@ -139,39 +194,32 @@ package object opencv {
 
   }
 
-  def mean(frames: Iterator[Mat]): Mat = {
-    if (frames.hasNext) {
-      val head = frames.next()
-      val size = head.size
+  def mean(ms: Iterator[Mat]): Mat =
+    if (ms.hasNext) {
       val imdType = CvType.CV_32SC3 // TODO
 
       def widen(m: Mat) = m.consume(_.convertTo(imdType))
-      val zero = zeros(size, imdType) -> 0
       def plus(a: (Mat, Int), b: (Mat, Int)) = (a._1, b._1).consume(_ + _) -> (a._2 + b._2)
 
-      val (sum, cnt) = (Iterator.single(head) ++ frames).map(widen(_) -> 1).fold(zero)(plus)
+      val (sum, cnt) = ms.map(widen(_) -> 1).reduce(plus)
 
       sum.consume(_ / new Scalar(cnt, cnt, cnt))
     } else {
-      zeros(0, 0, CvType.CV_32SC3)
+      new Mat
     }
-  }
 
-  def meanPar(frames: Iterator[Mat], batchSize: Int): Mat = {
-    if (frames.hasNext) {
-      val head = frames.next()
-      val size = head.size
+  def meanPar(ms: Iterator[Mat], batchSize: Int): Mat =
+    if (ms.hasNext) {
       val imdType = CvType.CV_32SC3 // TODO
 
       def widen(m: Mat) = m.consume(_.convertTo(imdType))
-      val zero = zeros(size, imdType) -> 0
       def plus(a: (Mat, Int), b: (Mat, Int)) = (a._1, b._1).consume(_ + _) -> (a._2 + b._2)
 
-      val partitions = (Iterator.single(head) ++ frames).grouped(batchSize)
+      val partitions = ms.grouped(batchSize)
       val (sum, cnt) =
         partitions
-          .map(_.par.map(widen(_) -> 1).fold(zero)(plus))
-          .fold(zero)(plus)
+          .map(_.par.map(widen(_) -> 1).reduce(plus))
+          .reduce(plus)
 
 /*
       import scala.concurrent.{Await, ExecutionContext, Future}
@@ -189,8 +237,7 @@ package object opencv {
 
       sum.consume(_ / new Scalar(cnt, cnt, cnt))
     } else {
-      zeros(0, 0, CvType.CV_32SC3)
+      new Mat
     }
-  }
 
 }
